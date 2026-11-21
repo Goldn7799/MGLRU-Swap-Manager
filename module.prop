@@ -1,0 +1,6 @@
+id=swapfile_minttl
+name=MGLRU Swap Manager
+version=v2.2
+versionCode=5
+author=Goldn7799 (GMRC79)
+description=Creates a swapfile at boot and can turn off MGLRU min_ttl_ms. Everything is configurable from the WebUI.

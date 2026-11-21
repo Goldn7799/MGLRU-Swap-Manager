@@ -1,0 +1,586 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>MGLRU Swap Manager</title>
+<style>
+:root{
+  --bg:#f4f6f8;--card:#ffffff;--text:#16202a;--muted:#5d6b78;--line:#e1e6eb;
+  --accent:#0f766e;--accent-ink:#ffffff;--danger:#b42318;--warn:#b54708;--ok:#067647;--track:#e6ebef;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#0e1317;--card:#171e24;--text:#e8edf1;--muted:#93a1ad;--line:#26313a;
+    --accent:#2dd4bf;--accent-ink:#04201c;--danger:#f97066;--warn:#fdb022;--ok:#47cd89;--track:#26313a;
+  }
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:640px;margin:0 auto;
+  padding:max(16px,var(--window-inset-top,0px)) 16px max(24px,var(--window-inset-bottom,0px))}
+header{margin:8px 0 14px}
+.hrow{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+h1{font-size:22px;margin:0 0 2px;letter-spacing:-.01em}
+h2{font-size:15px;margin:0 0 12px}
+h3{font-size:12px;margin:16px 0 8px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:600}
+.sub{margin:0;color:var(--muted);font-size:13px}
+.seg{display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;flex:none;background:var(--card)}
+.seg button{border:0;background:transparent;color:var(--muted);font:inherit;font-size:13px;font-weight:600;padding:7px 12px}
+.seg button.on{background:var(--accent);color:var(--accent-ink)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:12px}
+.banner{border-radius:12px;padding:10px 14px;margin-bottom:12px;font-size:13px;border:1px solid var(--line);background:var(--card)}
+.banner.warn{border-color:var(--warn);color:var(--warn)}
+.banner.busy{border-color:var(--accent);color:var(--accent);display:flex;gap:10px;align-items:center}
+.spin{width:14px;height:14px;border-radius:50%;border:2px solid currentColor;border-right-color:transparent;animation:sp .8s linear infinite;flex:none}
+@keyframes sp{to{transform:rotate(360deg)}}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.stat{background:var(--bg);border-radius:10px;padding:10px 12px}
+.stat .k{display:block;font-size:12px;color:var(--muted)}
+.stat .v{display:block;font-size:18px;font-weight:650;margin-top:2px;font-variant-numeric:tabular-nums}
+.sw{padding:10px 12px;border:1px solid var(--line);border-radius:10px;margin-bottom:8px}
+.sw.ours{border-color:var(--accent)}
+.sw .top{display:flex;justify-content:space-between;gap:8px;font-size:13px}
+.sw .name{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sw .meta{color:var(--muted);font-size:12px;margin-top:2px}
+.bar{height:6px;background:var(--track);border-radius:3px;margin-top:8px;overflow:hidden}
+.bar>i{display:block;height:100%;background:var(--accent);border-radius:3px}
+.empty{color:var(--muted);font-size:13px;padding:6px 0}
+.note{margin:8px 0 0;font-size:12px;color:var(--muted)}
+.field{margin-bottom:16px}
+.field>label,.lbl{display:block;font-weight:600;font-size:14px;margin-bottom:6px}
+.help{font-size:12px;color:var(--muted);margin:5px 0 0}
+input[type=number],select{width:100%;padding:11px 12px;font:inherit;color:var(--text);background:var(--bg);
+  border:1px solid var(--line);border-radius:10px;outline:none}
+input:focus,select:focus{border-color:var(--accent)}
+input:disabled{opacity:.5}
+.inline{display:flex;gap:8px}
+.inline>*{flex:1}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.chip{border:1px solid var(--line);background:var(--bg);color:var(--text);border-radius:999px;padding:5px 12px;font:inherit;font-size:13px}
+.chip:active{border-color:var(--accent)}
+.toggle{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
+.toggle b{display:block;font-size:14px}
+.toggle small{display:block;color:var(--muted);font-size:12px}
+.switch{position:relative;width:46px;height:26px;flex:none}
+.switch input{opacity:0;width:100%;height:100%;position:absolute;margin:0}
+.switch span{position:absolute;inset:0;background:var(--track);border-radius:13px;transition:.15s}
+.switch span::after{content:"";position:absolute;left:3px;top:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:.15s}
+.switch input:checked+span{background:var(--accent)}
+.switch input:checked+span::after{transform:translateX(20px)}
+.hints{font-size:12px;margin:-4px 0 12px}
+.hints p{margin:4px 0}
+.hints .w{color:var(--warn)}
+.hints .e{color:var(--danger)}
+.actions{display:flex;gap:8px}
+.btn{flex:1;padding:12px 14px;font:inherit;font-weight:600;border-radius:10px;border:1px solid var(--line);
+  background:var(--bg);color:var(--text)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.danger{color:var(--danger)}
+.btn:disabled{opacity:.45}
+.btn:active:not(:disabled){filter:brightness(.92)}
+pre{margin:0;max-height:260px;overflow:auto;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;
+  white-space:pre-wrap;word-break:break-word;color:var(--muted)}
+#toast{position:fixed;left:50%;bottom:max(24px,var(--window-inset-bottom,0px));transform:translate(-50%,20px);
+  background:var(--text);color:var(--bg);padding:10px 16px;border-radius:10px;font-size:13px;opacity:0;
+  pointer-events:none;transition:.2s;max-width:90vw;text-align:center}
+#toast.show{opacity:1;transform:translate(-50%,0)}
+dialog{border:1px solid var(--line);border-radius:14px;background:var(--card);color:var(--text);padding:18px;max-width:340px;width:calc(100% - 40px)}
+dialog::backdrop{background:rgba(0,0,0,.5)}
+dialog h2{margin-bottom:8px}
+dialog p{margin:0 0 16px;color:var(--muted);font-size:14px}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="hrow">
+      <div>
+        <h1>MGLRU Swap Manager</h1>
+        <p class="sub" id="sub"></p>
+      </div>
+      <div class="seg" role="group" aria-label="Language">
+        <button type="button" data-lang="en">EN</button>
+        <button type="button" data-lang="id">ID</button>
+      </div>
+    </div>
+  </header>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <section class="card">
+    <h2 data-i18n="status"></h2>
+    <div class="grid">
+      <div class="stat"><span class="k">min_ttl_ms</span><span class="v" id="s-ttl">–</span></div>
+      <div class="stat"><span class="k">swappiness</span><span class="v" id="s-swp">–</span></div>
+      <div class="stat"><span class="k" data-i18n="k_ram"></span><span class="v" id="s-ram">–</span></div>
+      <div class="stat"><span class="k" data-i18n="k_free"></span><span class="v" id="s-free">–</span></div>
+    </div>
+    <h3 data-i18n="swap_devs"></h3>
+    <div id="swaps"></div>
+    <p class="note" id="file-note"></p>
+  </section>
+
+  <section class="card">
+    <h2 data-i18n="settings"></h2>
+
+    <div class="toggle">
+      <div><b data-i18n="boot_t"></b><small data-i18n="boot_d"></small></div>
+      <label class="switch"><input type="checkbox" id="f-enabled"><span></span></label>
+    </div>
+
+    <div class="field">
+      <label for="f-size" data-i18n="size_l"></label>
+      <input type="number" id="f-size" inputmode="numeric" min="256" max="65536" step="128">
+      <div class="chips" id="chips"></div>
+    </div>
+
+    <div class="field">
+      <span class="lbl" data-i18n="prio_l"></span>
+      <div class="inline">
+        <select id="f-prio-mode">
+          <option value="auto" data-i18n="prio_auto"></option>
+          <option value="manual" data-i18n="prio_manual"></option>
+        </select>
+        <input type="number" id="f-prio" inputmode="numeric" min="0" max="32767" placeholder="0–32767">
+      </div>
+      <p class="help" data-i18n="prio_help"></p>
+    </div>
+
+    <div class="field">
+      <label for="f-swappiness">vm.swappiness</label>
+      <input type="number" id="f-swappiness" inputmode="numeric" min="0" max="200" data-i18n-ph="swp_ph">
+      <p class="help" data-i18n="swp_help"></p>
+    </div>
+
+    <div class="toggle">
+      <div>
+        <b data-i18n="ttl_t"></b>
+        <small data-i18n="ttl_d"></small>
+        <small id="ttl-def"></small>
+      </div>
+      <label class="switch"><input type="checkbox" id="f-ttl-off"><span></span></label>
+    </div>
+
+    <div class="hints" id="hints"></div>
+
+    <div class="actions">
+      <button class="btn" id="b-save" data-i18n="save"></button>
+      <button class="btn primary" id="b-apply" data-i18n="apply"></button>
+    </div>
+    <p class="note" data-i18n="save_note"></p>
+  </section>
+
+  <section class="card">
+    <h2 data-i18n="actions"></h2>
+    <div class="actions">
+      <button class="btn" id="b-off" data-i18n="swapoff"></button>
+      <button class="btn danger" id="b-del" data-i18n="delete"></button>
+    </div>
+    <p class="note" data-i18n="actions_note"></p>
+  </section>
+
+  <section class="card">
+    <h2 data-i18n="log"></h2>
+    <pre id="log">–</pre>
+  </section>
+</main>
+
+<div id="toast"></div>
+
+<dialog id="dlg">
+  <form method="dialog">
+    <h2 id="dlg-title"></h2>
+    <p id="dlg-text"></p>
+    <div class="actions">
+      <button class="btn" value="cancel" data-i18n="cancel"></button>
+      <button class="btn primary" value="ok" id="dlg-ok"></button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+const MOD  = '/data/adb/modules/swapfile_minttl';
+const CONF = '/data/adb/swapfile_minttl.conf';
+const hasKsu = typeof ksu !== 'undefined' && typeof ksu.exec === 'function';
+const $ = id => document.getElementById(id);
+
+/* ---------- translations ---------- */
+const I18N = {
+  en: {
+    title: 'Swap & MGLRU', loading: 'Loading…', status: 'Status',
+    k_ram: 'Available RAM', k_free: '/data free', swap_devs: 'Swap devices',
+    no_swaps: 'No active swap devices yet.', ours: ' · module swapfile',
+    meta: '{type} · priority {prio}',
+    file_yes: 'Swap file at /data/adb/swapfile: {size}.', file_no: 'Swap file has not been created yet.',
+    sub_on: 'Swapfile active', sub_off: 'Swapfile not active', sub_disc: 'Not connected',
+    settings: 'Settings',
+    boot_t: 'Swapfile at boot', boot_d: 'Create and enable the swapfile on every boot',
+    size_l: 'Swapfile size (MB)',
+    prio_l: 'Swap priority', prio_auto: 'Automatic (below zram)', prio_manual: 'Manual',
+    prio_help: 'Automatic means zram is used first. Manual: a higher number is used first.',
+    swp_ph: 'Empty = leave unchanged',
+    swp_help: 'Range 0–200. Leave empty to keep the ROM default.',
+    ttl_t: 'Turn off min_ttl_ms',
+    ttl_d: 'On: set min_ttl_ms to 0. Off: use the kernel default.',
+    ttl_def: 'Kernel default: {v}', ttl_def_unknown: 'Kernel default: not recorded yet (reboot once)',
+    save: 'Save', apply: 'Save & apply',
+    save_note: 'Save: takes effect on the next boot. Apply: runs right now.',
+    actions: 'Actions', swapoff: 'Turn off swapfile', delete: 'Delete swapfile',
+    actions_note: 'Turning off lasts until reboot. Deleting frees space on /data.',
+    log: 'Log', log_empty: '(log is empty)',
+    preview: 'Preview with sample data. Open from KernelSU Next to change real settings.',
+    busy: 'Working. Creating a large swapfile can take a minute or more.',
+    err_read: 'Could not read status. Make sure the module is installed and enabled, then reboot if it was just installed.',
+    hint_resize: 'Size changes from {cur}: the swapfile will be recreated when applied.',
+    hint_space: 'Not enough space on /data (need {need}, available {avail}).',
+    err_size: 'Swap size must be a whole number from 256 to 65536 MB.',
+    err_prio: 'Manual priority must be 0–32767.',
+    err_swp: 'swappiness must be 0–200.',
+    t_saved: 'Saved. Takes effect on the next boot.', t_save_fail: 'Failed to save settings.',
+    t_applying: 'Applying, please wait…', t_done: 'Done. Check the log below.',
+    cancel: 'Cancel',
+    off_title: 'Turn off swapfile?', off_text: 'The swapfile is turned off until reboot. Settings are not changed.', off_ok: 'Turn off',
+    del_title: 'Delete swapfile?', del_text: 'The swapfile is turned off and the file is deleted. If swapfile at boot is still on, it is recreated on the next boot.', del_ok: 'Delete'
+  },
+  id: {
+    title: 'Swap & MGLRU', loading: 'Memuat…', status: 'Status',
+    k_ram: 'RAM tersedia', k_free: 'Ruang /data', swap_devs: 'Perangkat swap',
+    no_swaps: 'Belum ada perangkat swap aktif.', ours: ' · swapfile modul',
+    meta: '{type} · prioritas {prio}',
+    file_yes: 'File swap di /data/adb/swapfile: {size}.', file_no: 'File swap belum dibuat.',
+    sub_on: 'Swapfile aktif', sub_off: 'Swapfile tidak aktif', sub_disc: 'Tidak terhubung',
+    settings: 'Pengaturan',
+    boot_t: 'Swapfile saat boot', boot_d: 'Buat dan aktifkan swapfile setiap boot',
+    size_l: 'Ukuran swapfile (MB)',
+    prio_l: 'Prioritas swap', prio_auto: 'Otomatis (di bawah zram)', prio_manual: 'Manual',
+    prio_help: 'Otomatis berarti zram dipakai lebih dulu. Manual: angka lebih besar dipakai lebih dulu.',
+    swp_ph: 'Kosong = tidak diubah',
+    swp_help: 'Rentang 0–200. Kosongkan untuk memakai nilai bawaan ROM.',
+    ttl_t: 'Matikan min_ttl_ms',
+    ttl_d: 'On: set min_ttl_ms ke 0. Off: pakai nilai default kernel.',
+    ttl_def: 'Default kernel: {v}', ttl_def_unknown: 'Default kernel: belum tercatat (reboot sekali)',
+    save: 'Simpan', apply: 'Simpan & terapkan',
+    save_note: 'Simpan: berlaku di boot berikutnya. Terapkan: langsung dijalankan sekarang.',
+    actions: 'Tindakan', swapoff: 'Matikan swapfile', delete: 'Hapus swapfile',
+    actions_note: 'Mematikan hanya berlaku sampai reboot. Menghapus membebaskan ruang /data.',
+    log: 'Log', log_empty: '(log kosong)',
+    preview: 'Pratinjau dengan data contoh. Buka dari KernelSU Next untuk mengubah pengaturan sungguhan.',
+    busy: 'Sedang bekerja. Membuat swapfile besar bisa memakan waktu satu menit lebih.',
+    err_read: 'Gagal membaca status. Pastikan modul terpasang dan aktif, lalu reboot jika baru dipasang.',
+    hint_resize: 'Ukuran berubah dari {cur}: swapfile akan dibuat ulang saat diterapkan.',
+    hint_space: 'Ruang /data tidak cukup (butuh {need}, tersedia {avail}).',
+    err_size: 'Ukuran swap harus bilangan bulat 256–65536 MB.',
+    err_prio: 'Prioritas manual harus 0–32767.',
+    err_swp: 'swappiness harus 0–200.',
+    t_saved: 'Tersimpan. Berlaku di boot berikutnya.', t_save_fail: 'Gagal menyimpan pengaturan.',
+    t_applying: 'Diterapkan, mohon tunggu…', t_done: 'Selesai. Cek log di bawah.',
+    cancel: 'Batal',
+    off_title: 'Matikan swapfile?', off_text: 'Swapfile dimatikan sampai reboot. Pengaturan tidak berubah.', off_ok: 'Matikan',
+    del_title: 'Hapus swapfile?', del_text: 'Swapfile dimatikan lalu filenya dihapus. Jika swapfile saat boot masih aktif, file dibuat ulang di boot berikutnya.', del_ok: 'Hapus'
+  }
+};
+
+function loadLang() {
+  try { const v = localStorage.getItem('lang'); if (v === 'en' || v === 'id') return v; } catch (e) {}
+  return 'en';
+}
+function saveLang(v) { try { localStorage.setItem('lang', v); } catch (e) {} }
+
+let lang = loadLang();
+function t(key, p) {
+  let s = (I18N[lang] && I18N[lang][key]) || I18N.en[key] || key;
+  if (p) for (const k in p) s = s.split('{' + k + '}').join(p[k]);
+  return s;
+}
+
+function applyLang() {
+  document.documentElement.lang = lang;
+  document.title = t('title');
+  document.querySelectorAll('[data-i18n]').forEach(e => { e.textContent = t(e.dataset.i18n); });
+  document.querySelectorAll('[data-i18n-ph]').forEach(e => { e.placeholder = t(e.dataset.i18nPh); });
+  document.querySelectorAll('.seg button').forEach(b => b.classList.toggle('on', b.dataset.lang === lang));
+  if (st) render(); else $('sub').textContent = t('loading');
+}
+
+/* ---------- bridge to the root shell ---------- */
+function exec(cmd) {
+  return new Promise(resolve => {
+    if (!hasKsu) { resolve(mockExec(cmd)); return; }
+    const cb = 'cb_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+    window[cb] = (errno, stdout, stderr) => {
+      delete window[cb];
+      resolve({ errno, stdout: stdout || '', stderr: stderr || '' });
+    };
+    try { ksu.exec(cmd, '{}', cb); }
+    catch (e) { delete window[cb]; resolve({ errno: -1, stdout: '', stderr: String(e) }); }
+  });
+}
+
+/* sample data so the page can be previewed in a normal browser */
+function mockExec(cmd) {
+  if (cmd.indexOf('status.sh') === -1) return { errno: 0, stdout: '', stderr: '' };
+  return { errno: 0, stderr: '', stdout:
+`swap_active=1
+swap_dev=/data/adb/swapfile
+file_mb=2048
+busy=0
+min_ttl=0
+ttl_default=1000
+swappiness=100
+mem_total_kb=5857000
+mem_avail_kb=2412000
+data_free_mb=48210
+cfg_enabled=1
+cfg_size=2048
+cfg_prio=-1
+cfg_swappiness=
+cfg_ttl_disable=1
+---SWAPS---
+Filename                                Type            Size    Used    Priority
+/dev/block/zram0                        partition       3654056 543240  10
+/data/adb/swapfile                      file            2097148 12288   -2
+---LOG---
+[09:15:59] min_ttl_ms turned off, now: 0
+[09:16:41] Swapfile ready
+[09:16:41] swapon succeeded
+[09:16:41] Done` };
+}
+
+/* ---------- helpers ---------- */
+let st = null, formInit = false;
+let launched = false, seenBusy = false, launchT = 0;
+
+function toast(msg) {
+  const el = $('toast');
+  el.textContent = msg; el.className = 'show';
+  clearTimeout(toast.t);
+  toast.t = setTimeout(() => { el.className = ''; }, 2800);
+}
+function fmtKB(kb) {
+  kb = Number(kb) || 0;
+  if (kb >= 1048576) return (kb / 1048576).toFixed(2) + ' GB';
+  if (kb >= 1024) return Math.round(kb / 1024) + ' MB';
+  return kb + ' KB';
+}
+function fmtMB(mb) { return fmtKB((Number(mb) || 0) * 1024); }
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+function confirmDlg(title, text, okLabel) {
+  return new Promise(res => {
+    $('dlg-title').textContent = title;
+    $('dlg-text').textContent = text;
+    $('dlg-ok').textContent = okLabel;
+    const d = $('dlg');
+    d.returnValue = '';
+    d.onclose = () => res(d.returnValue === 'ok');
+    d.showModal();
+  });
+}
+
+/* ---------- read status ---------- */
+function parse(out) {
+  const kv = {}, swaps = [], log = [];
+  let sec = 'kv';
+  for (const line of out.split('\n')) {
+    if (line === '---SWAPS---') { sec = 'swaps'; continue; }
+    if (line === '---LOG---')   { sec = 'log';   continue; }
+    if (sec === 'kv') {
+      const i = line.indexOf('=');
+      if (i > 0) kv[line.slice(0, i)] = line.slice(i + 1);
+    } else if (sec === 'swaps') {
+      const p = line.trim().split(/\s+/);
+      if (p.length >= 5 && p[0] !== 'Filename')
+        swaps.push({ name: p[0], type: p[1], size: +p[2], used: +p[3], prio: p[4] });
+    } else log.push(line);
+  }
+  return { kv, swaps, log: log.join('\n').trim() };
+}
+
+async function refresh() {
+  const r = await exec(
+    `sh ${MOD}/status.sh; echo ---SWAPS---; cat /proc/swaps; echo ---LOG---; tail -n 40 ${MOD}/module.log 2>/dev/null`);
+  if (!r.stdout || r.stdout.indexOf('swap_active=') === -1) {
+    showBanner('warn', esc(t('err_read')) + (r.stderr ? ' (' + esc(r.stderr.trim()) + ')' : ''));
+    $('sub').textContent = t('sub_disc');
+    return;
+  }
+  st = parse(r.stdout);
+
+  if (st.kv.busy === '1') seenBusy = true;
+  if (launched && st.kv.busy !== '1' && (seenBusy || Date.now() - launchT > 4000)) {
+    launched = false; seenBusy = false;
+    toast(t('t_done'));
+    formInit = false; // reload form values from the effective config
+  }
+  render();
+}
+
+/* ---------- rendering ---------- */
+function showBanner(kind, html) {
+  const b = $('banner');
+  b.hidden = !html;
+  b.className = 'banner ' + kind;
+  b.innerHTML = html || '';
+}
+
+function render() {
+  const k = st.kv;
+  const busy = k.busy === '1' || launched;
+
+  $('sub').textContent = k.swap_active === '1' ? t('sub_on') : t('sub_off');
+  $('s-ttl').textContent = k.min_ttl;
+  $('s-swp').textContent = k.swappiness || '–';
+  $('s-ram').textContent = fmtKB(k.mem_avail_kb) + ' / ' + fmtKB(k.mem_total_kb);
+  $('s-free').textContent = fmtMB(k.data_free_mb);
+
+  const box = $('swaps');
+  if (!st.swaps.length) box.innerHTML = '<div class="empty">' + esc(t('no_swaps')) + '</div>';
+  else box.innerHTML = st.swaps.map(s => {
+    const ours = s.name === k.swap_dev;
+    const pct = s.size ? Math.min(100, Math.round(s.used / s.size * 100)) : 0;
+    return `<div class="sw${ours ? ' ours' : ''}">
+      <div class="top"><span class="name">${esc(s.name)}${ours ? esc(t('ours')) : ''}</span>
+      <span>${fmtKB(s.used)} / ${fmtKB(s.size)}</span></div>
+      <div class="meta">${esc(t('meta', { type: s.type, prio: s.prio }))}</div>
+      <div class="bar"><i style="width:${pct}%"></i></div></div>`;
+  }).join('');
+
+  $('file-note').textContent = Number(k.file_mb) > 0
+    ? t('file_yes', { size: fmtMB(k.file_mb) })
+    : t('file_no');
+
+  $('ttl-def').textContent = k.ttl_default !== ''
+    ? t('ttl_def', { v: k.ttl_default })
+    : t('ttl_def_unknown');
+
+  $('log').textContent = st.log || t('log_empty');
+
+  if (!formInit) { fillForm(); formInit = true; }
+
+  if (!hasKsu) showBanner('warn', esc(t('preview')));
+  else if (busy) showBanner('busy', '<span class="spin"></span><span>' + esc(t('busy')) + '</span>');
+  else showBanner('', '');
+
+  for (const id of ['b-save', 'b-apply', 'b-off', 'b-del']) $(id).disabled = busy;
+  updateHints();
+}
+
+function fillForm() {
+  const k = st.kv;
+  $('f-enabled').checked = k.cfg_enabled === '1';
+  $('f-size').value = k.cfg_size;
+  const prio = Number(k.cfg_prio);
+  $('f-prio-mode').value = prio < 0 ? 'auto' : 'manual';
+  $('f-prio').value = prio < 0 ? '' : prio;
+  $('f-prio').disabled = prio < 0;
+  $('f-swappiness').value = k.cfg_swappiness;
+  $('f-ttl-off').checked = k.cfg_ttl_disable === '1';
+}
+
+function updateHints() {
+  if (!st) return;
+  const k = st.kv, h = [];
+  const size = Number($('f-size').value);
+  const cur = Number(k.file_mb) || 0;
+  const free = Number(k.data_free_mb) || 0;
+  if (Number.isInteger(size) && size > 0) {
+    if (size !== cur && cur > 0)
+      h.push(['w', t('hint_resize', { cur: fmtMB(cur) })]);
+    if (size !== cur && size + 512 > free + cur)
+      h.push(['e', t('hint_space', { need: fmtMB(size + 512), avail: fmtMB(free + cur) })]);
+  }
+  $('hints').innerHTML = h.map(x => `<p class="${x[0]}">${esc(x[1])}</p>`).join('');
+}
+
+/* ---------- read form, save, apply ---------- */
+function readForm() {
+  const o = { enabled: $('f-enabled').checked ? 1 : 0, ttlOff: $('f-ttl-off').checked ? 1 : 0 };
+
+  const size = Number($('f-size').value);
+  if ($('f-size').value === '' || !Number.isInteger(size) || size < 256 || size > 65536)
+    return { errKey: 'err_size' };
+  o.size = size;
+
+  if ($('f-prio-mode').value === 'auto') o.prio = -1;
+  else {
+    const p = Number($('f-prio').value);
+    if ($('f-prio').value === '' || !Number.isInteger(p) || p < 0 || p > 32767)
+      return { errKey: 'err_prio' };
+    o.prio = p;
+  }
+
+  const sw = $('f-swappiness').value.trim();
+  if (sw === '') o.swappiness = '';
+  else {
+    const v = Number(sw);
+    if (!Number.isInteger(v) || v < 0 || v > 200) return { errKey: 'err_swp' };
+    o.swappiness = v;
+  }
+  return o;
+}
+
+async function saveConf(o) {
+  // every value is validated as a number, so it is safe to put in the shell command
+  const cmd = `printf '%s\\n' 'SWAP_ENABLED=${o.enabled}' 'SWAP_SIZE_MB=${o.size}' ` +
+              `'SWAP_PRIORITY=${o.prio}' 'SWAPPINESS=${o.swappiness}' 'MIN_TTL_DISABLE=${o.ttlOff}' ` +
+              `> ${CONF}.tmp && mv ${CONF}.tmp ${CONF}`;
+  const r = await exec(cmd);
+  return r.errno === 0;
+}
+
+async function launch(args) {
+  launched = true; seenBusy = false; launchT = Date.now();
+  render();
+  await exec(`(sh ${MOD}/apply.sh ${args} >/dev/null 2>&1 &)`);
+  setTimeout(refresh, 800);
+}
+
+$('b-save').onclick = async () => {
+  const o = readForm();
+  if (o.errKey) { toast(t(o.errKey)); return; }
+  if (await saveConf(o)) { toast(t('t_saved')); formInit = false; refresh(); }
+  else toast(t('t_save_fail'));
+};
+
+$('b-apply').onclick = async () => {
+  const o = readForm();
+  if (o.errKey) { toast(t(o.errKey)); return; }
+  if (!(await saveConf(o))) { toast(t('t_save_fail')); return; }
+  toast(t('t_applying'));
+  launch('apply force');
+};
+
+$('b-off').onclick = async () => {
+  if (await confirmDlg(t('off_title'), t('off_text'), t('off_ok'))) launch('swapoff');
+};
+
+$('b-del').onclick = async () => {
+  if (await confirmDlg(t('del_title'), t('del_text'), t('del_ok'))) launch('delete');
+};
+
+/* ---------- form interaction ---------- */
+[512, 1024, 2048, 3072, 4096].forEach(mb => {
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'chip';
+  b.textContent = mb >= 1024 ? (mb / 1024) + ' GB' : mb + ' MB';
+  b.onclick = () => { $('f-size').value = mb; updateHints(); };
+  $('chips').appendChild(b);
+});
+$('f-prio-mode').onchange = () => { $('f-prio').disabled = $('f-prio-mode').value === 'auto'; };
+$('f-size').oninput = updateHints;
+
+document.querySelectorAll('.seg button').forEach(b => {
+  b.onclick = () => { lang = b.dataset.lang; saveLang(lang); applyLang(); };
+});
+
+/* ---------- start + polling ---------- */
+applyLang();
+(function loop() {
+  refresh().finally(() => setTimeout(loop, launched ? 1500 : 4000));
+})();
+</script>
+</body>
+</html>
